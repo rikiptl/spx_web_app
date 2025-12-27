@@ -195,6 +195,24 @@
     .chip b{color:var(--text); font-weight:800}
     .chip .warn{ color: var(--maxNeon); font-weight:900; }
 
+    /* Dominance badge (borrowed from landscape) */
+    .dot{width:8px;height:8px;border-radius:50%;background: rgba(255,255,255,.5);}
+    .dot.green{background: rgba(74,222,128,.95);}  /* matches landscape green */
+    .dot.red{background: rgba(248,113,113,.95);}   /* matches landscape red */
+    .dot.neutral{background: rgba(255,255,255,.55);}
+
+    .domWrap{display:flex;flex-direction:column;gap:6px;align-items:flex-end;}
+    .domBadge{
+      border-radius:999px;padding:7px 10px;font-size:12px;font-weight:800;
+      border:1px solid var(--line);
+      background: rgba(255,255,255,.04);
+      display:inline-flex;gap:8px;align-items:center;white-space:nowrap;
+    }
+    .domBadge.call{border-color: rgba(34,197,94,.35); background: rgba(34,197,94,.10);}
+    .domBadge.put{border-color: rgba(239,68,68,.35); background: rgba(239,68,68,.10);}
+    .domBadge.mixed{border-color: rgba(255,255,255,.20); background: rgba(255,255,255,.05);}
+    .domMini{font-size:11px;color:var(--muted);text-align:right;max-width:320px;}
+
     .error{
       margin-top:10px;
       background: rgba(220,38,38,.15);
@@ -647,6 +665,10 @@
           <div class="histHeaderRight">
             <div class="pill">Spot: <b id="spotPill">—</b></div>
             <div class="pill">Expiry: <b id="expPill">—</b></div>
+            <div class="domWrap">
+              <div id="domBadge" class="domBadge mixed"><span class="dot neutral"></span> Mixed / Transition</div>
+              <div class="domMini" id="domMini">Below spot: — calls • Above spot: — puts</div>
+            </div>
           </div>
         </div>
 
@@ -711,6 +733,17 @@
       const x = Number(n);
       if(!isFinite(x)) return "—";
       return x.toLocaleString(undefined,{minimumFractionDigits:d,maximumFractionDigits:d});
+    }
+
+    function fmtPct(x){
+      const n = Number(x);
+      if(!isFinite(n)) return "—";
+      return (n*100).toFixed(0) + "%";
+    }
+
+    function setDot(el, mode){
+      el.classList.remove("green","red","neutral");
+      el.classList.add(mode);
     }
 
     function fmtK(n){
@@ -939,6 +972,55 @@
       // linear-ish fade
       const a = 1.0 - (ageMin / 30.0);
       return Math.max(0, Math.min(1, a));
+    }
+
+    /*
+     * Strike dominance (replicated from landscape view)
+     * - Below spot: share of strikes dominated by calls (net > 0)
+     * - Above spot: share of strikes dominated by puts  (net < 0)
+     */
+    function buildDominanceRows(p){
+      const h = p.histogram || p;
+      const strikes = h.strikes || [];
+      const netOI   = h.net_oi ?? h.gex_oi ?? h.oi ?? [];
+
+      const rows = [];
+      for(let i=0;i<strikes.length;i++){
+        const strike = Number(strikes[i]);
+        const net = Number(netOI[i] ?? 0);
+        if(!isFinite(strike) || !isFinite(net)) continue;
+        rows.push({ strike, net_oi: net });
+      }
+      return rows;
+    }
+
+    function computeDominance(rows, spot){
+      const below = rows.filter(r => r.strike < spot);
+      const above = rows.filter(r => r.strike > spot);
+      const belowCount = Math.max(below.length, 1);
+      const aboveCount = Math.max(above.length, 1);
+
+      const belowCallShare = below.filter(r => r.net_oi > 0).length / belowCount;
+      const abovePutShare  = above.filter(r => r.net_oi < 0).length / aboveCount;
+
+      let label = "Mixed / Transition";
+      let cls = "mixed";
+      let dot = "neutral";
+
+      if (belowCallShare >= 0.60 && abovePutShare <= 0.40){
+        label = "CALL Dominated"; cls = "call"; dot = "green";
+      } else if (abovePutShare >= 0.60 && belowCallShare <= 0.40){
+        label = "PUT Dominated"; cls = "put"; dot = "red";
+      }
+      return { belowCallShare, abovePutShare, label, cls, dot };
+    }
+
+    function renderDominance(dom){
+      const badge = $("domBadge");
+      badge.classList.remove("call","put","mixed");
+      badge.classList.add(dom.cls);
+      badge.innerHTML = `<span class="dot ${dom.dot}"></span> ${dom.label}`;
+      $("domMini").textContent = `Below spot: ${fmtPct(dom.belowCallShare)} calls • Above spot: ${fmtPct(dom.abovePutShare)} puts`;
     }
 
     function renderHistogram(p){
@@ -1171,6 +1253,11 @@
 
         setTopStrip(p);
         setLevels(p);
+        const domRows = buildDominanceRows(p);
+        const dom = (isFinite(Number(p.spot)) && domRows.length)
+          ? computeDominance(domRows, Number(p.spot))
+          : { belowCallShare: NaN, abovePutShare: NaN, label: "Mixed / Transition", cls: "mixed", dot: "neutral" };
+        renderDominance(dom);
         renderHistogram(p);
         setUpdatedNow();
 
