@@ -1,0 +1,28 @@
+{
+  "server": {
+    "host": "0.0.0.0",
+    "port": 8787
+  },
+  "data": {
+    "default_symbol": "$SPX",
+    "default_dte": 0,
+    "default_strike_count": 60,
+    "max_strike_count": 80,
+    "chain_range": "NTM",
+    "unusual_window_pts": 30,
+    "unusual_top_n": 10
+  },
+  "cache": {
+    "enabled": true,
+    "ttl_seconds": 12
+  },
+  "rate_limit": {
+    "enabled": true,
+    "max_requests_per_minute": 100,
+    "safety_reserve": 20
+  },
+  "ui": {
+    "auto_refresh_seconds": 15
+  }
+}
+
