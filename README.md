@@ -288,7 +288,7 @@ You now have a foundation comparable to GEXBot / SpotGamma — with full control
 Use `smoke_test.py` to check a deployed instance (local or remote) without shipping data. Example:
 
 ```
-python smoke_test.py --base-url http://localhost:8787 --symbol $SPX --strike-count 60
+python smoke_test.py --base-url http://localhost:8787 --symbol SPX --strike-count 60
 ```
 
 The script verifies:

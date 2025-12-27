@@ -2,7 +2,7 @@
 Lightweight smoke test runner for a running GEX dashboard server.
 
 Examples:
-  python smoke_test.py --base-url http://localhost:8000 --symbol $SPX --strike-count 20
+  python smoke_test.py --base-url http://localhost:8000 --symbol SPX --strike-count 20
 """
 import argparse
 import json
@@ -58,8 +58,18 @@ def check_mvp(base_url: str, symbol: str, strike_count: int, timeout: float) -> 
 
 def main() -> int:
     parser = argparse.ArgumentParser(description="Smoke test a running GEX dashboard server")
-    parser.add_argument("--base-url", default="http://localhost:8000", help="Server base URL (default: http://localhost:8000)")
-    parser.add_argument("--symbol", default="$SPX", help="Symbol to query")
+    parser.add_argument(
+        "--base-url",
+        default="http://localhost:8000",
+        help="Server base URL (default: http://localhost:8000)",
+    )
+    parser.add_argument(
+        "--symbol",
+        nargs="?",
+        default="SPX",
+        const="SPX",
+        help="Symbol to query (default: SPX)",
+    )
     parser.add_argument("--strike-count", type=int, default=20, help="Strike count for MVP call")
     parser.add_argument("--timeout", type=float, default=5.0, help="Timeout (seconds) per request")
     args = parser.parse_args()
