@@ -283,3 +283,17 @@ This system now provides:
 ✔ Expandable architecture
 
 You now have a foundation comparable to GEXBot / SpotGamma — with full control.
+
+## Smoke testing a running server
+Use `smoke_test.py` to check a deployed instance (local or remote) without shipping data. Example:
+
+```
+python smoke_test.py --base-url http://localhost:8787 --symbol $SPX --strike-count 60
+```
+
+The script verifies:
+- `/` serves the dashboard HTML
+- `/api/expiries` returns expiry keys for the symbol
+- `/api/mvp` returns live snapshot fields (spot, live flag)
+
+Use `--base-url` to point at your own server (e.g., `https://your-host.example.com`).
