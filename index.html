@@ -1,0 +1,1231 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width,initial-scale=1" />
+  <title>GEX Dashboard</title>
+
+  <style>
+    :root{
+      --bg:#070b12;
+      --panel:#0b1220;
+      --line:rgba(255,255,255,.08);
+      --text:#e5e7eb;
+      --muted:#9ca3af;
+
+      /* Landscape grading */
+      --oiPos: rgba(144,238,144,.85);  /* light green */
+      --oiNeg: rgba(255,160,160,.85);  /* light red   */
+      --volPos: rgba(0,180,90,.95);    /* dark green  */
+      --volNeg: rgba(200,40,40,.95);   /* dark red    */
+
+      --purple: rgba(124,58,237,.55);
+
+      --btn:#2563eb;
+      --btn2:#1d4ed8;
+
+      --chip:rgba(255,255,255,.06);
+
+      --spot: rgba(56,189,248,.95);
+      --spotBg: rgba(56,189,248,.12);
+
+      --emHiBg: rgba(34,197,94,.12);
+      --emLoBg: rgba(239,68,68,.12);
+
+      /* Max-change colors (Neon Yellow + Gold) */
+      --maxNeon: rgba(250, 255, 70, .95);  /* neon yellow */
+      --maxGold: rgba(255, 193, 7,  .95);  /* gold */
+      --maxBg:   rgba(250, 255, 70, .10);
+    }
+
+    *{box-sizing:border-box}
+    body{
+      margin:0;
+      font-family: ui-sans-serif, system-ui, -apple-system, Segoe UI, Roboto, Helvetica, Arial;
+      background:
+        radial-gradient(1200px 700px at 20% 10%, rgba(34,197,94,.12), transparent 60%),
+        radial-gradient(900px 700px at 70% 30%, rgba(59,130,246,.10), transparent 60%),
+        radial-gradient(1000px 800px at 50% 90%, rgba(168,85,247,.10), transparent 60%),
+        var(--bg);
+      color:var(--text);
+      height:100vh;
+      overflow:hidden;
+    }
+
+    /* Layout: top metrics strip + 3-column grid */
+    .page{
+      height:100vh;
+      display:flex;
+      flex-direction:column;
+      gap:12px;
+      padding:12px;
+    }
+
+    .topStrip{
+      display:flex;
+      gap:10px;
+      flex-wrap:wrap;
+      align-items:center;
+      padding:10px 12px;
+      border-radius:16px;
+      border:1px solid var(--line);
+      background: linear-gradient(180deg, rgba(255,255,255,.03), rgba(255,255,255,.01));
+      box-shadow: 0 10px 28px rgba(0,0,0,.25);
+      min-height:56px;
+    }
+
+    .metric{
+      display:flex;
+      flex-direction:column;
+      gap:2px;
+      padding:8px 10px;
+      border-radius:12px;
+      background: rgba(0,0,0,.18);
+      border:1px solid rgba(255,255,255,.06);
+      min-width:130px;
+    }
+    .metric .k{ font-size:11px; color:var(--muted); font-weight:800; letter-spacing:.2px; }
+    .metric .v{
+      font-size:14px;
+      font-weight:900;
+      font-variant-numeric: tabular-nums;
+      white-space:nowrap;
+    }
+    .metric .v.pos{ color: rgba(144,238,144,.95); }
+    .metric .v.neg{ color: rgba(255,160,160,.95); }
+
+    .grid{
+      flex:1;
+      display:grid;
+      grid-template-columns: 320px 1fr 360px;
+      gap:14px;
+      min-height:0;
+    }
+
+    .card{
+      background: linear-gradient(180deg, rgba(255,255,255,.03), rgba(255,255,255,.01));
+      border:1px solid var(--line);
+      border-radius:16px;
+      overflow:hidden;
+      box-shadow: 0 10px 28px rgba(0,0,0,.35);
+      min-height:0;
+    }
+
+    .header{
+      padding:14px 14px 10px;
+      border-bottom:1px solid var(--line);
+      display:flex;
+      align-items:center;
+      justify-content:space-between;
+      gap:10px;
+      background: rgba(0,0,0,.18);
+    }
+
+    .title{
+      font-weight:800;
+      letter-spacing:.2px;
+      font-size:14px;
+    }
+    .subtitle{
+      color:var(--muted);
+      font-size:12px;
+      margin-top:2px;
+    }
+
+    .body{ padding:14px; min-height:0; }
+
+    .row{ display:flex; gap:10px; align-items:center; }
+
+    label{
+      font-size:12px;
+      color:var(--muted);
+      display:block;
+      margin-bottom:6px;
+    }
+
+    input, select{
+      width:100%;
+      background: rgba(255,255,255,.03);
+      border:1px solid var(--line);
+      color:var(--text);
+      border-radius:10px;
+      padding:10px 10px;
+      outline:none;
+    }
+
+    button{
+      width:100%;
+      border:none;
+      border-radius:10px;
+      padding:10px 12px;
+      color:white;
+      background: linear-gradient(180deg, var(--btn), var(--btn2));
+      cursor:pointer;
+      font-weight:800;
+    }
+    button:disabled{opacity:.6; cursor:not-allowed}
+
+    .navBtn{
+      width:auto;
+      padding:7px 10px;
+      font-size:12px;
+      background: rgba(255,255,255,.05);
+      border:1px solid var(--line);
+      color:var(--text);
+      border-radius:10px;
+      cursor:pointer;
+      font-weight:700;
+    }
+
+    .chips{
+      display:flex;
+      flex-wrap:wrap;
+      gap:8px;
+      margin-top:10px;
+    }
+    .chip{
+      font-size:12px;
+      padding:6px 10px;
+      border-radius:999px;
+      background: var(--chip);
+      border:1px solid var(--line);
+      color:var(--muted);
+      white-space:nowrap;
+    }
+    .chip b{color:var(--text); font-weight:800}
+    .chip .warn{ color: var(--maxNeon); font-weight:900; }
+
+    .error{
+      margin-top:10px;
+      background: rgba(220,38,38,.15);
+      border:1px solid rgba(220,38,38,.45);
+      padding:10px 12px;
+      border-radius:10px;
+      font-size:12px;
+      color:#fecaca;
+      display:none;
+      white-space:pre-wrap;
+    }
+
+    /* ===== Center histogram ===== */
+    .centerWrap{
+      display:flex;
+      flex-direction:column;
+      height:100%;
+      min-height:0;
+    }
+
+    .histHeaderRight{
+      display:flex;
+      gap:8px;
+      align-items:center;
+      flex-wrap:wrap;
+      justify-content:flex-end;
+    }
+
+    .pill{
+      font-size:12px;
+      padding:6px 10px;
+      border-radius:999px;
+      background: rgba(255,255,255,.04);
+      border:1px solid var(--line);
+      color:var(--muted);
+      white-space:nowrap;
+    }
+    .pill b{ color:var(--text); }
+
+    .histPanel{
+      position:relative;
+      padding:14px;
+      height:100%;
+      min-height:0;
+    }
+
+    /* Only ONE scroll: the strike list */
+    .histList{
+      height:100%;
+      min-height:0;
+      overflow:auto;
+      padding-right:6px;
+      scroll-behavior:smooth;
+    }
+
+    .histRow{
+      display:grid;
+      grid-template-columns: 70px 1fr 120px;
+      gap:10px;
+      align-items:center;
+      padding:8px 10px;
+      border-radius:12px;
+      border:1px solid rgba(255,255,255,.04);
+      background: rgba(0,0,0,.10);
+      margin-bottom:8px;
+      position:relative;
+    }
+
+    .strike{
+      font-weight:900;
+      color:#cfe3ff;
+      letter-spacing:.2px;
+    }
+
+    .barTrack{
+      height:12px;
+      border-radius:999px;
+      background: rgba(255,255,255,.05);
+      position:relative;
+      overflow:hidden;
+    }
+
+    .barOI{
+      position:absolute;
+      top:0; bottom:0;
+      border-radius:999px;
+      opacity:.95;
+    }
+
+    .barVOL{
+      position:absolute;
+      top:2px; bottom:2px;
+      border-radius:999px;
+      opacity:.95;
+      filter: saturate(1.05);
+    }
+
+    /* Max-change overlay bar */
+    .barMAX{
+      position:absolute;
+      top:4px; bottom:4px;
+      border-radius:999px;
+      opacity:1;
+      background: linear-gradient(90deg, var(--maxNeon), var(--maxGold));
+      box-shadow:
+        0 0 0 1px rgba(0,0,0,.25) inset,
+        0 0 16px rgba(250,255,70,.20);
+      pointer-events:none;
+    }
+
+    .zeroLine{
+      position:absolute;
+      top:0; bottom:0;
+      left:50%;
+      width:2px;
+      background: rgba(255,255,255,.10);
+      box-shadow: 0 0 0 1px rgba(0,0,0,.15);
+      pointer-events:none;
+    }
+
+    .num{
+      text-align:right;
+      font-variant-numeric: tabular-nums;
+      font-size:12px;
+      color:var(--muted);
+      white-space:nowrap;
+    }
+    .num b{ color:var(--text); font-weight:900; }
+
+    /* Spot highlight row */
+    .spotRow{
+      border:1px solid rgba(56,189,248,.45);
+      background: linear-gradient(90deg, rgba(56,189,248,.14), rgba(0,0,0,.10));
+      box-shadow: 0 0 0 1px rgba(56,189,248,.12) inset;
+    }
+    .spotTag{
+      display:inline-flex;
+      align-items:center;
+      gap:6px;
+      font-size:11px;
+      padding:4px 8px;
+      border-radius:999px;
+      background: var(--spotBg);
+      border:1px solid rgba(56,189,248,.35);
+      color: #bfefff;
+      margin-left:8px;
+      font-weight:900;
+    }
+    .spotDot{
+      width:8px;height:8px;border-radius:999px;
+      background: var(--spot);
+      box-shadow: 0 0 0 3px rgba(56,189,248,.18);
+    }
+
+    /* Max-change row accent */
+    .maxRow{
+      border:1px solid rgba(250,255,70,.55);
+      background: linear-gradient(90deg, rgba(250,255,70,.10), rgba(0,0,0,.10));
+      box-shadow: 0 0 0 1px rgba(250,255,70,.10) inset;
+    }
+
+    /* EM badges: top-right upper, bottom-left lower */
+    .emBadge{
+      position:absolute;
+      z-index:5;
+      font-size:12px;
+      padding:8px 10px;
+      border-radius:12px;
+      border:1px solid var(--line);
+      background: rgba(0,0,0,.25);
+      backdrop-filter: blur(6px);
+      display:flex;
+      gap:8px;
+      align-items:center;
+      pointer-events:none;
+    }
+    .emBadge .k{ color:var(--muted); font-weight:800; }
+    .emBadge .v{ color:var(--text); font-weight:900; font-variant-numeric: tabular-nums; }
+
+    .emHigh{
+      top:12px; right:12px;
+      border-color: rgba(34,197,94,.35);
+      background: linear-gradient(180deg, var(--emHiBg), rgba(0,0,0,.22));
+    }
+    .emLow{
+      bottom:12px; left:12px;
+      border-color: rgba(239,68,68,.35);
+      background: linear-gradient(180deg, var(--emLoBg), rgba(0,0,0,.22));
+    }
+
+    /* Tooltip */
+    .tip{
+      position:fixed;
+      z-index:9999;
+      padding:8px 10px;
+      border-radius:12px;
+      border:1px solid rgba(255,255,255,.12);
+      background: rgba(0,0,0,.78);
+      box-shadow: 0 10px 30px rgba(0,0,0,.45);
+      color:var(--text);
+      font-size:12px;
+      pointer-events:none;
+      display:none;
+      white-space:nowrap;
+    }
+    .tip .k{ color:var(--muted); font-weight:800; margin-right:6px; }
+    .tip .v{ font-weight:900; font-variant-numeric: tabular-nums; }
+
+    /* RIGHT levels */
+    .levels{ display:grid; gap:10px; }
+    .kv{
+      display:flex;
+      justify-content:space-between;
+      align-items:center;
+      border:1px solid var(--line);
+      background: rgba(255,255,255,.02);
+      border-radius:12px;
+      padding:10px 12px;
+      font-size:13px;
+    }
+    .kv .k{ color:var(--muted); }
+    .kv .v{ font-weight:900; font-variant-numeric: tabular-nums; }
+
+    details{
+      margin-top:10px;
+      border:1px solid var(--line);
+      background: rgba(255,255,255,.02);
+      border-radius:12px;
+      padding:10px 12px;
+    }
+    summary{ cursor:pointer; font-weight:900; font-size:13px; }
+    .faq{
+      margin-top:8px;
+      color:var(--muted);
+      font-size:12px;
+      line-height:1.45;
+    }
+    .faq ul{ margin:8px 0 0 18px; }
+    .faq li{ margin:6px 0; }
+
+    /* Max-change panel */
+    .mcPanel{
+      margin-top:12px;
+      border:1px solid var(--line);
+      background: rgba(255,255,255,.02);
+      border-radius:12px;
+      padding:10px 12px;
+    }
+    .mcHdr{
+      display:flex;
+      justify-content:space-between;
+      align-items:center;
+      gap:10px;
+      margin-bottom:8px;
+    }
+    .mcTitle{
+      font-weight:900;
+      font-size:13px;
+    }
+    .mcLegend{
+      display:flex;
+      gap:8px;
+      flex-wrap:wrap;
+      justify-content:flex-end;
+      color:var(--muted);
+      font-size:12px;
+    }
+    .swatch{
+      width:12px;height:12px;border-radius:4px;display:inline-block;border:1px solid rgba(255,255,255,.10);
+      vertical-align:middle;margin-right:6px;
+    }
+    .swOIpos{ background: var(--oiPos); }
+    .swOIneg{ background: var(--oiNeg); }
+    .swVOLpos{ background: var(--volPos); }
+    .swVOLneg{ background: var(--volNeg); }
+    .swMAX{ background: linear-gradient(90deg, var(--maxNeon), var(--maxGold)); }
+
+    .mcList{
+      max-height:160px;
+      overflow:auto;
+      padding-right:6px;
+    }
+    .mcItem{
+      display:flex;
+      justify-content:space-between;
+      gap:10px;
+      padding:8px 10px;
+      border-radius:12px;
+      border:1px solid rgba(255,255,255,.05);
+      background: rgba(0,0,0,.10);
+      margin-bottom:8px;
+      font-size:12px;
+      color:var(--muted);
+      font-variant-numeric: tabular-nums;
+    }
+    .mcItem b{ color: var(--text); }
+    .mcItem .sigPos{ color: rgba(144,238,144,.95); font-weight:900; }
+    .mcItem .sigNeg{ color: rgba(255,160,160,.95); font-weight:900; }
+
+    /* Flip alert toast */
+    .toast{
+      position: fixed;
+      right: 14px;
+      bottom: 14px;
+      padding: 10px 12px;
+      border-radius: 14px;
+      border: 1px solid rgba(250,255,70,.35);
+      background: rgba(0,0,0,.75);
+      box-shadow: 0 18px 40px rgba(0,0,0,.45);
+      color: var(--text);
+      font-size: 12px;
+      display: none;
+      z-index: 99999;
+      max-width: 360px;
+    }
+    .toast b{ color: var(--maxNeon); }
+  </style>
+</head>
+
+<body>
+  <div class="page">
+
+    <!-- TOP METRICS STRIP -->
+    <div class="topStrip">
+      <div class="metric"><div class="k">NET OI</div><div class="v" id="m_net_oi">—</div></div>
+      <div class="metric"><div class="k">NET VOL</div><div class="v" id="m_net_vol">—</div></div>
+      <div class="metric"><div class="k">PUT/CALL OI</div><div class="v" id="m_pc">—</div></div>
+      <div class="metric"><div class="k">EXPECTED MOVE</div><div class="v" id="m_em">—</div></div>
+      <div class="metric"><div class="k">ZERO PIVOT</div><div class="v" id="m_zero">—</div></div>
+      <div class="metric"><div class="k">CALL WALL</div><div class="v" id="m_call">—</div></div>
+      <div class="metric"><div class="k">PUT WALL</div><div class="v" id="m_put">—</div></div>
+      <div class="metric"><div class="k">EXPIRY</div><div class="v" id="m_exp">—</div></div>
+    </div>
+
+    <div class="grid">
+
+      <!-- LEFT: Controls -->
+      <div class="card">
+        <div class="header">
+          <div>
+            <div class="title">Controls</div>
+            <div class="subtitle">Dashboard</div>
+          </div>
+          <button class="navBtn" onclick="window.location.href='/landscape'">Landscape →</button>
+          <button class="navBtn" onclick="window.location.href='/chart'">Chart →</button>
+        </div>
+
+        <div class="body">
+          <div style="margin-bottom:10px;">
+            <label>Symbol</label>
+            <input id="symbol" value="$SPX" />
+          </div>
+
+          <div class="row" style="margin-bottom:10px;">
+            <div style="flex:1;">
+              <label>Strike Count</label>
+              <input id="strike_count" type="number" value="60" min="10" max="90" />
+            </div>
+          </div>
+
+          <div style="margin-bottom:10px;">
+            <label>Expiry (dropdown)</label>
+            <select id="expiry_select"></select>
+            <div style="margin-top:6px;color:var(--muted);font-size:11px;">
+              Dropdown only (best for API limits).
+            </div>
+          </div>
+
+          <div class="row" style="margin-bottom:10px;">
+            <div style="flex:1;">
+              <label>Auto-refresh (sec)</label>
+              <input id="auto_sec" type="number" value="3" min="1" max="60"/>
+            </div>
+            <div style="flex:1;">
+              <label>Enable</label>
+              <select id="auto_on">
+                <option value="on" selected>ON</option>
+                <option value="off">OFF</option>
+              </select>
+            </div>
+          </div>
+
+          <!-- Max change controls -->
+          <div class="row" style="margin-bottom:10px;">
+            <div style="flex:1;">
+              <label>Show Max Change</label>
+              <select id="mc_on">
+                <option value="on" selected>ON</option>
+                <option value="off">OFF</option>
+              </select>
+            </div>
+            <div style="flex:1;">
+              <label>Max Change Window</label>
+              <select id="mc_win">
+                <option value="1m">1m</option>
+                <option value="5m" selected>5m</option>
+                <option value="15m">15m</option>
+              </select>
+            </div>
+          </div>
+
+          <button id="refreshBtn">Refresh</button>
+
+          <div class="chips">
+            <div class="chip">Live: <b id="liveFlag">—</b></div>
+            <div class="chip">Updated: <b id="updatedAt">—</b></div>
+            <div class="chip">MaxChange: <b id="mcBadge">—</b></div>
+          </div>
+
+          <div id="err" class="error"></div>
+
+          <details>
+            <summary>FAQ (Dashboard)</summary>
+            <div class="faq">
+              <ul>
+                <li><b>Light bars</b>: Net OI proxy (Calls − Puts).</li>
+                <li><b>Dark overlay</b>: Volume proxy (CallVol − PutVol) when available.</li>
+                <li><b>Neon/Gold</b>: Largest delta shift in last selected window (Max Change).</li>
+                <li><b>Spot row</b>: closest strike to spot (highlighted + auto-scroll).</li>
+                <li><b>Hover</b> any row/bar to see values.</li>
+              </ul>
+            </div>
+          </details>
+
+          <!-- Max-change history -->
+          <div class="mcPanel">
+            <div class="mcHdr">
+              <div class="mcTitle">Max Change History</div>
+              <div class="mcLegend">
+                <span><span class="swatch swMAX"></span>Max</span>
+                <span><span class="swatch swOIpos"></span>OI+</span>
+                <span><span class="swatch swOIneg"></span>OI-</span>
+                <span><span class="swatch swVOLpos"></span>Vol+</span>
+                <span><span class="swatch swVOLneg"></span>Vol-</span>
+              </div>
+            </div>
+            <div class="mcList" id="mcList"></div>
+          </div>
+
+        </div>
+      </div>
+
+      <!-- CENTER: Strike Histogram -->
+      <div class="card centerWrap">
+        <div class="header">
+          <div>
+            <div class="title">Strike Histogram</div>
+            <div class="subtitle">Light = OI · Dark = Volume · Neon/Gold = Max Change</div>
+          </div>
+          <div class="histHeaderRight">
+            <div class="pill">Spot: <b id="spotPill">—</b></div>
+            <div class="pill">Expiry: <b id="expPill">—</b></div>
+          </div>
+        </div>
+
+        <div class="histPanel">
+          <div class="emBadge emHigh">
+            <span class="k">Upper</span><span class="v" id="emHighBadge">—</span>
+          </div>
+          <div class="emBadge emLow">
+            <span class="k">Lower</span><span class="v" id="emLowBadge">—</span>
+          </div>
+
+          <div class="histList" id="histList"></div>
+        </div>
+      </div>
+
+      <!-- RIGHT: Levels -->
+      <div class="card">
+        <div class="header">
+          <div>
+            <div class="title">Levels</div>
+            <div class="subtitle">Quick reference</div>
+          </div>
+        </div>
+
+        <div class="body">
+          <div class="levels">
+            <div class="kv"><div class="k">Symbol</div><div class="v" id="lv_symbol">—</div></div>
+            <div class="kv"><div class="k">Expiry</div><div class="v" id="lv_expiry">—</div></div>
+            <div class="kv"><div class="k">Spot</div><div class="v" id="lv_spot">—</div></div>
+
+            <div class="kv"><div class="k">Expected Move</div><div class="v" id="lv_em">—</div></div>
+            <div class="kv"><div class="k">EM Range</div><div class="v" id="lv_range">—</div></div>
+
+            <div class="kv"><div class="k">Zero Pivot</div><div class="v" id="lv_zero">—</div></div>
+            <div class="kv"><div class="k">Call Wall</div><div class="v" id="lv_call">—</div></div>
+            <div class="kv"><div class="k">Put Wall</div><div class="v" id="lv_put">—</div></div>
+          </div>
+
+          <details style="margin-top:12px;">
+            <summary>FAQ (Levels)</summary>
+            <div class="faq">
+              <ul>
+                <li><b>Upper/Lower</b> are EM High/Low.</li>
+                <li><b>Zero Pivot</b> is the proxy crossing (not “true dealer” zero-gamma).</li>
+              </ul>
+            </div>
+          </details>
+        </div>
+      </div>
+
+    </div>
+  </div>
+
+  <div class="tip" id="tip"></div>
+  <div class="toast" id="toast"></div>
+
+  <script>
+    const $ = (id)=>document.getElementById(id);
+
+    function fmt(n, d=2){
+      if(n===null || n===undefined) return "—";
+      const x = Number(n);
+      if(!isFinite(x)) return "—";
+      return x.toLocaleString(undefined,{minimumFractionDigits:d,maximumFractionDigits:d});
+    }
+
+    function fmtK(n){
+      n = Number(n);
+      if(!isFinite(n)) return "—";
+      const a = Math.abs(n);
+      if(a>=1e12) return (n/1e12).toFixed(2) + "T";
+      if(a>=1e9)  return (n/1e9).toFixed(2) + "Bn";
+      if(a>=1e6)  return (n/1e6).toFixed(2) + "M";
+      if(a>=1e3)  return (n/1e3).toFixed(2) + "K";
+      return String(Math.round(n));
+    }
+
+    function showError(msg){
+      const el = $("err");
+      if(!msg){ el.style.display="none"; el.textContent=""; return; }
+      el.style.display="block";
+      el.textContent = msg;
+    }
+
+    function setUpdatedNow(){
+      $("updatedAt").textContent = new Date().toLocaleTimeString();
+    }
+
+    function metricSet(elId, value, signed=false){
+      const el = $(elId);
+      if(!el) return;
+      el.classList.remove("pos","neg");
+      if(value===null || value===undefined || value==="—"){
+        el.textContent = "—";
+        return;
+      }
+      const n = Number(value);
+      if(isFinite(n)){
+        const txt = signed ? ((n>=0?"+":"") + fmtK(n)) : fmtK(n);
+        el.textContent = txt;
+        if(signed){
+          el.classList.add(n>0 ? "pos" : (n<0 ? "neg" : ""));
+        }
+      }else{
+        el.textContent = String(value);
+      }
+    }
+
+    function setTopStrip(p){
+      const s = p.summary || {};
+      metricSet("m_net_oi", s.net_oi_total ?? null, true);
+      metricSet("m_net_vol", s.net_vol_total ?? null, true);
+
+      const pc = s.put_call_oi_ratio;
+      $("m_pc").textContent = (pc===null || pc===undefined) ? "—" : pc.toFixed(2);
+
+      const em = p.expected_move ?? null;
+      $("m_em").textContent = em===null ? "—" : ("± " + fmt(em,2));
+
+      $("m_zero").textContent = fmt(p.zero_gamma,2);
+      $("m_call").textContent = fmt(p.call_wall,2);
+      $("m_put").textContent  = fmt(p.put_wall,2);
+      $("m_exp").textContent  = p.expiry ?? "—";
+    }
+
+    function setLevels(p){
+      $("lv_symbol").textContent = p.symbol ?? "—";
+      $("lv_expiry").textContent = p.expiry ?? "—";
+      $("lv_spot").textContent = fmt(p.spot,2);
+
+      const em = (p.expected_move ?? null);
+      const emL = (p.em_lower ?? null);
+      const emH = (p.em_upper ?? null);
+
+      $("lv_em").textContent = em===null ? "—" : ("± " + fmt(em,2));
+      $("lv_range").textContent = (emL===null || emH===null) ? "—" : (fmt(emL,2) + " → " + fmt(emH,2));
+
+      $("lv_zero").textContent = fmt(p.zero_gamma,2);
+      $("lv_call").textContent = fmt(p.call_wall,2);
+      $("lv_put").textContent  = fmt(p.put_wall,2);
+
+      $("spotPill").textContent = fmt(p.spot,2);
+      $("expPill").textContent  = p.expiry ?? "—";
+
+      $("emHighBadge").textContent = emH===null ? "—" : fmt(emH,2);
+      $("emLowBadge").textContent  = emL===null ? "—" : fmt(emL,2);
+    }
+
+    function pickNearestStrike(strikes, spot){
+      if(!Array.isArray(strikes) || !strikes.length || !isFinite(spot)) return null;
+      let best = strikes[0], bestD = Math.abs(Number(best)-spot);
+      for(const s of strikes){
+        const d = Math.abs(Number(s)-spot);
+        if(d < bestD){ best=s; bestD=d; }
+      }
+      return Number(best);
+    }
+
+    // Tooltip
+    function tipShow(html, x, y){
+      const t = $("tip");
+      t.innerHTML = html;
+      t.style.display = "block";
+      const pad = 14;
+      const w = t.offsetWidth || 200;
+      const h = t.offsetHeight || 40;
+      let nx = x + 14, ny = y + 14;
+      if(nx + w + pad > window.innerWidth) nx = x - w - 14;
+      if(ny + h + pad > window.innerHeight) ny = y - h - 14;
+      t.style.left = nx + "px";
+      t.style.top  = ny + "px";
+    }
+    function tipHide(){
+      const t = $("tip");
+      t.style.display = "none";
+    }
+
+    function toast(msg){
+      const t = $("toast");
+      t.innerHTML = msg;
+      t.style.display = "block";
+      clearTimeout(toast._timer);
+      toast._timer = setTimeout(()=>{ t.style.display="none"; }, 4500);
+    }
+
+    // ===== Max-change tracking (frontend) =====
+    // Keep recent max-change events so we can:
+    // - fade old highlight bars
+    // - show history panel
+    // - detect sign flip
+    const mcHistory = []; // {t, win, strike, delta}
+    const mcLastSeenByStrike = new Map(); // strike -> timestamp(ms)
+    const mcLastSignByWin = new Map(); // "1m"/"5m"/"15m" -> -1/0/+1
+
+    function mcGetSelectedWindow(){
+      return $("mc_win").value || "5m";
+    }
+    function mcEnabled(){
+      return $("mc_on").value === "on";
+    }
+
+    function mcNormalizeEntry(p){
+      // API shape example:
+      // "maxchange": { "1m": {"strike":6925,"delta":8001...}, "5m": {...}, "15m": {...} }
+      const win = mcGetSelectedWindow();
+      const mc = p.maxchange || null;
+      if(!mc || !mc[win] || !mc[win].strike || mc[win].delta === undefined) return null;
+
+      const strike = Number(mc[win].strike);
+      const delta = Number(mc[win].delta);
+      if(!isFinite(strike) || !isFinite(delta)) return null;
+
+      return { win, strike, delta };
+    }
+
+    function mcPush(entry){
+      const now = Date.now();
+
+      // sign flip detection (per window)
+      const sign = entry.delta > 0 ? 1 : (entry.delta < 0 ? -1 : 0);
+      const prev = mcLastSignByWin.get(entry.win);
+      if(prev !== undefined && prev !== 0 && sign !== 0 && sign !== prev){
+        toast(`Max Change <b>flip</b> detected (${entry.win}): strike <b>${entry.strike}</b>, delta <b>${(entry.delta>=0?"+":"") + fmtK(entry.delta)}</b>`);
+      }
+      mcLastSignByWin.set(entry.win, sign);
+
+      // store "last seen" for fading old bars
+      mcLastSeenByStrike.set(entry.strike, now);
+
+      // avoid spamming duplicates every refresh: only push when changed vs last in same window
+      const last = mcHistory.length ? mcHistory[0] : null;
+      if(last && last.win === entry.win && last.strike === entry.strike && last.delta === entry.delta){
+        return;
+      }
+
+      mcHistory.unshift({ t: now, ...entry });
+      // cap history
+      if(mcHistory.length > 40) mcHistory.length = 40;
+    }
+
+    function mcRenderHistory(){
+      const list = $("mcList");
+      list.innerHTML = "";
+
+      if(!mcHistory.length){
+        list.innerHTML = `<div style="color:var(--muted);font-size:12px;padding:6px 2px;">No max-change history yet (wait ~1–2 minutes with auto-refresh ON).</div>`;
+        return;
+      }
+
+      for(const it of mcHistory.slice(0, 15)){
+        const dt = new Date(it.t);
+        const time = dt.toLocaleTimeString();
+        const sigClass = it.delta >= 0 ? "sigPos" : "sigNeg";
+        const item = document.createElement("div");
+        item.className = "mcItem";
+        item.innerHTML = `
+          <div>
+            <b>${it.win}</b> · ${time}<br/>
+            Strike <b>${it.strike}</b>
+          </div>
+          <div class="${sigClass}">
+            ${(it.delta>=0?"+":"") + fmtK(it.delta)}
+          </div>
+        `;
+        list.appendChild(item);
+      }
+    }
+
+    function mcSetBadge(entry){
+      const el = $("mcBadge");
+      if(!mcEnabled()){
+        el.textContent = "OFF";
+        return;
+      }
+      if(!entry){
+        el.textContent = "—";
+        return;
+      }
+      el.innerHTML = `${entry.win} · ${entry.strike} · <span class="warn">${(entry.delta>=0?"+":"") + fmtK(entry.delta)}</span>`;
+    }
+
+    function mcFadeAlphaForStrike(strike){
+      // Fade older highlights over ~30 minutes
+      const last = mcLastSeenByStrike.get(strike);
+      if(!last) return 0;
+      const ageMs = Date.now() - last;
+      const ageMin = ageMs / 60000;
+      if(ageMin <= 0.5) return 1.00;     // fresh
+      if(ageMin >= 30) return 0;         // expired
+      // linear-ish fade
+      const a = 1.0 - (ageMin / 30.0);
+      return Math.max(0, Math.min(1, a));
+    }
+
+    function renderHistogram(p){
+      const list = $("histList");
+      list.innerHTML = "";
+
+      const h = p.histogram || p;
+      const strikes = h.strikes || [];
+      const netOI   = h.net_oi ?? h.gex_oi ?? h.oi ?? [];
+      const volNet  = h.net_vol ?? h.gex_vol ?? h.vol ?? [];
+
+      const spot = Number(p.spot);
+      const spotStrike = pickNearestStrike(strikes, spot);
+
+      // maxchange (selected window)
+      const mcEntry = mcEnabled() ? mcNormalizeEntry(p) : null;
+
+      let maxAbs = 1;
+      for(let i=0;i<strikes.length;i++){
+        maxAbs = Math.max(maxAbs, Math.abs(Number(netOI[i] ?? 0)));
+        if(volNet && volNet.length) maxAbs = Math.max(maxAbs, Math.abs(Number(volNet[i] ?? 0)));
+      }
+
+      let spotRowEl = null;
+      let mcRowEl = null;
+
+      for(let i=0;i<strikes.length;i++){
+        const strike = Number(strikes[i]);
+        const oi = Number(netOI[i] ?? 0);
+        const vv = (volNet && volNet.length) ? Number(volNet[i] ?? 0) : null;
+
+        const isSpot = (spotStrike!==null && strike===spotStrike);
+        const isMc = (mcEntry && strike === mcEntry.strike);
+
+        const row = document.createElement("div");
+        row.className = "histRow" + (isSpot ? " spotRow" : "") + (isMc ? " maxRow" : "");
+        row.dataset.strike = String(strike);
+
+        const strikeEl = document.createElement("div");
+        strikeEl.className = "strike";
+        strikeEl.textContent = String(strike);
+        if(isSpot){
+          const tag = document.createElement("span");
+          tag.className = "spotTag";
+          tag.innerHTML = `<span class="spotDot"></span>SPOT`;
+          strikeEl.appendChild(tag);
+        }
+
+        const barCell = document.createElement("div");
+        barCell.style.position = "relative";
+
+        const track = document.createElement("div");
+        track.className = "barTrack";
+
+        const zero = document.createElement("div");
+        zero.className = "zeroLine";
+        track.appendChild(zero);
+
+        const oiW = Math.min(100, Math.round(Math.abs(oi)/maxAbs*100));
+        const oiBar = document.createElement("div");
+        oiBar.className = "barOI";
+        oiBar.style.background = (oi>=0) ? "var(--oiPos)" : "var(--oiNeg)";
+        if(oi>=0){ oiBar.style.left = "50%"; oiBar.style.width = oiW + "%"; }
+        else     { oiBar.style.right= "50%"; oiBar.style.width = oiW + "%"; }
+        track.appendChild(oiBar);
+
+        if(vv !== null && isFinite(vv) && Math.abs(vv) > 0){
+          const vW = Math.min(100, Math.round(Math.abs(vv)/maxAbs*100));
+          const vBar = document.createElement("div");
+          vBar.className = "barVOL";
+          vBar.style.background = (vv>=0) ? "var(--volPos)" : "var(--volNeg)";
+          if(vv>=0){ vBar.style.left="50%"; vBar.style.width = vW + "%"; }
+          else     { vBar.style.right="50%"; vBar.style.width = vW + "%"; }
+          track.appendChild(vBar);
+        }
+
+        // Max-change overlay: show on current strike, and optionally faded for recently-seen strikes
+        if(mcEnabled()){
+          let alpha = 0;
+
+          if(isMc){
+            alpha = 1.0;
+          }else{
+            alpha = mcFadeAlphaForStrike(strike); // faded older highlights
+          }
+
+          if(alpha > 0){
+            const maxBar = document.createElement("div");
+            maxBar.className = "barMAX";
+            // Make it visible but not overpower: scale width to maxAbs (so it's comparable visually)
+            // Use absolute delta (mc delta) only for strike itself; for faded strikes we just show a small marker.
+            let w = 12;
+            if(isMc && mcEntry){
+              w = Math.min(100, Math.max(10, Math.round(Math.abs(mcEntry.delta) / (maxAbs || 1) * 100)));
+            }
+            maxBar.style.opacity = String(alpha);
+            // place on side based on sign (positive -> right, negative -> left)
+            const sign = (isMc && mcEntry) ? (mcEntry.delta >= 0 ? 1 : -1) : 1;
+            if(sign >= 0){
+              maxBar.style.left = "50%";
+              maxBar.style.width = w + "%";
+            }else{
+              maxBar.style.right = "50%";
+              maxBar.style.width = w + "%";
+            }
+            track.appendChild(maxBar);
+          }
+        }
+
+        barCell.appendChild(track);
+
+        const num = document.createElement("div");
+        num.className = "num";
+        const oiTxt = (oi>=0?"+":"") + fmtK(oi);
+        const vvTxt = (vv!==null && isFinite(vv)) ? ((vv>=0?"+":"") + fmtK(vv)) : "—";
+        num.innerHTML = `<b>${oiTxt}</b> | ${vvTxt}`;
+
+        // Hover tooltip on row + bar
+        const mcTxt = (mcEnabled() && mcEntry && isMc)
+          ? `<div><span class="k">Max Change (${mcEntry.win})</span><span class="v">${(mcEntry.delta>=0?"+":"") + fmtK(mcEntry.delta)}</span></div>
+             <div style="color:var(--muted);font-size:11px;margin-top:2px;">Largest delta shift in last ${mcEntry.win}</div>`
+          : (mcEnabled()
+              ? `<div style="color:var(--muted);font-size:11px;margin-top:2px;">Max Change: Largest delta shift in last ${mcGetSelectedWindow()}</div>`
+              : "");
+
+        const tipHtml = `
+          <div><span class="k">Strike</span><span class="v">${strike}</span></div>
+          <div><span class="k">Net OI</span><span class="v">${oiTxt}</span></div>
+          <div><span class="k">Net Vol</span><span class="v">${vvTxt}</span></div>
+          ${mcTxt}
+        `;
+
+        row.addEventListener("mousemove", (e)=>tipShow(tipHtml, e.clientX, e.clientY));
+        row.addEventListener("mouseleave", tipHide);
+        track.addEventListener("mousemove", (e)=>tipShow(tipHtml, e.clientX, e.clientY));
+        track.addEventListener("mouseleave", tipHide);
+
+        row.appendChild(strikeEl);
+        row.appendChild(barCell);
+        row.appendChild(num);
+
+        list.appendChild(row);
+
+        if(isSpot) spotRowEl = row;
+        if(isMc) mcRowEl = row;
+      }
+
+      // Auto-scroll to spot row (so it’s easy to track)
+      if(spotRowEl){
+        const listEl = $("histList");
+        const top = spotRowEl.offsetTop - (listEl.clientHeight * 0.35);
+        listEl.scrollTo({ top: Math.max(0, top), behavior: "smooth" });
+      }
+    }
+
+    async function fetchExpiries(symbol){
+      const url = `/api/expiries?symbol=${encodeURIComponent(symbol)}`;
+      try{
+        const r = await fetch(url);
+        if(!r.ok) return [];
+        const j = await r.json();
+        return Array.isArray(j.expiries) ? j.expiries : [];
+      }catch(e){
+        return [];
+      }
+    }
+
+    function setExpiryDropdown(items){
+      const sel = $("expiry_select");
+      const current = sel.value;
+      sel.innerHTML = "";
+      for(const it of items){
+        const opt = document.createElement("option");
+        opt.value = String(it);
+        opt.textContent = String(it);
+        sel.appendChild(opt);
+      }
+      if(current && items.includes(current)) sel.value = current;
+    }
+
+    function buildMvpUrl(){
+      const symbol = $("symbol").value.trim() || "$SPX";
+      const strikeCount = Number($("strike_count").value || 60);
+      const expiry = $("expiry_select").value || "";
+      const qs = new URLSearchParams();
+      qs.set("symbol", symbol);
+      qs.set("strike_count", String(strikeCount));
+      if(expiry) qs.set("expiry", expiry);
+      return "/api/mvp?" + qs.toString();
+    }
+
+    let autoTimer = null;
+
+    function stopAuto(){
+      if(autoTimer){ clearInterval(autoTimer); autoTimer = null; }
+    }
+
+    function startAuto(){
+      stopAuto();
+      const on = $("auto_on").value === "on";
+      if(!on) return;
+      const sec = Math.max(1, Math.min(60, Number($("auto_sec").value || 3)));
+      autoTimer = setInterval(loadData, sec * 1000);
+    }
+
+    async function loadData(){
+      showError("");
+      $("refreshBtn").disabled = true;
+      $("refreshBtn").textContent = "Loading...";
+
+      try{
+        const url = buildMvpUrl();
+        const r = await fetch(url);
+        const j = await r.json();
+        if(!r.ok){
+          throw new Error("API error " + r.status + ": " + JSON.stringify(j));
+        }
+
+        const p = j.payload || j;
+
+        $("liveFlag").textContent = (p.live === true) ? "YES" : ((p.live === false) ? "NO" : "YES");
+
+        // Max-change update (frontend tracking)
+        const mcEntry = mcEnabled() ? mcNormalizeEntry(p) : null;
+        if(mcEntry){
+          mcPush(mcEntry);
+        }
+        mcSetBadge(mcEntry);
+        mcRenderHistory();
+
+        setTopStrip(p);
+        setLevels(p);
+        renderHistogram(p);
+        setUpdatedNow();
+
+      }catch(e){
+        showError(String(e?.message || e));
+      }finally{
+        $("refreshBtn").disabled = false;
+        $("refreshBtn").textContent = "Refresh";
+      }
+    }
+
+    async function init(){
+      // requested default
+      $("auto_sec").value = "3";
+      $("auto_on").value = "on";
+
+      $("refreshBtn").addEventListener("click", async ()=>{
+        await loadData();
+        startAuto();
+      });
+
+      $("auto_on").addEventListener("change", startAuto);
+      $("auto_sec").addEventListener("change", startAuto);
+
+      $("mc_on").addEventListener("change", async ()=>{
+        await loadData();
+      });
+      $("mc_win").addEventListener("change", async ()=>{
+        await loadData();
+      });
+
+      // refresh expiries when symbol changes (blur)
+      $("symbol").addEventListener("change", async ()=>{
+        const sym = $("symbol").value.trim() || "$SPX";
+        const expiries = await fetchExpiries(sym);
+        if(expiries.length){
+          setExpiryDropdown(expiries);
+        }
+        await loadData();
+      });
+
+      // initial expiries
+      const symbol = $("symbol").value.trim() || "$SPX";
+      const expiries = await fetchExpiries(symbol);
+      if(expiries.length){
+        setExpiryDropdown(expiries);
+      }
+
+      // First load + start auto
+      await loadData();
+      startAuto();
+    }
+
+    init();
+  </script>
+</body>
+</html>
+
