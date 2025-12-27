@@ -1,0 +1,595 @@
+#!/usr/bin/env python3
+# gex_web.py
+#
+# One-file FastAPI backend for MVP dashboard + landscape + chart page.
+# - Expiry dropdown via /api/expiries
+# - Main data via /api/mvp?symbol=$SPX&expiry=YYYY-MM-DD:DTE&strike_count=60
+# - Adds maxchange (largest delta-by-strike shift) for 1m/5m/15m
+#
+# IMPORTANT: Public errors do NOT mention upstream/provider names.
+
+from __future__ import annotations
+
+import json
+import time
+from dataclasses import dataclass
+from pathlib import Path
+from typing import Any, Dict, List, Optional, Tuple
+
+import requests
+from fastapi import FastAPI, Query
+from fastapi.responses import FileResponse, JSONResponse, HTMLResponse
+from fastapi.staticfiles import StaticFiles
+
+# ----------------------------
+# Config (paths + limits)
+# ----------------------------
+BASE_DIR = Path(__file__).resolve().parent
+
+INDEX_HTML = BASE_DIR / "index.html"
+LANDSCAPE_HTML = BASE_DIR / "landscape.html"
+
+# NEW: chart page (support both names + static/)
+CHART_HTML = BASE_DIR / "chart.html"
+CHARTS_HTML = BASE_DIR / "charts.html"
+STATIC_DIR = BASE_DIR / "static"
+STATIC_CHART = STATIC_DIR / "chart.html"
+
+# Token file you already have:
+TOKEN_FILE = BASE_DIR / "schwab_tokens_schwab_lib.json"
+
+# Optional app creds file (needed only if you want auto-refresh)
+# Format: {"client_id":"...","client_secret":"..."}
+CRED_FILE = BASE_DIR / "schwab_app.json"
+
+CHAIN_URL = "https://api.schwabapi.com/marketdata/v1/chains"
+
+# Avoid payload overflow
+DEFAULT_RANGE = "NTM"
+MAX_STRIKECOUNT_HARD = 90  # hard clamp
+
+# Caching
+CACHE_TTL_SEC = 3          # chain snapshot cache (short)
+EXPIRY_TTL_SEC = 90        # expiries cache
+
+# Snapshot history for maxchange
+HISTORY_MAX_POINTS = 300       # enough for ~15 minutes at 3s refresh (300*3s=900s)
+HISTORY_MAX_AGE_SEC = 60 * 35  # keep up to 35 minutes
+
+
+@dataclass
+class CacheItem:
+    t: float
+    data: dict
+
+
+_CHAIN_CACHE: Dict[Tuple[str, str, int], CacheItem] = {}
+_EXPIRY_CACHE: Dict[Tuple[str, int], CacheItem] = {}
+
+# For maxchange: (symbol, expiry, strike_count) -> list[(ts, gex_oi_list)]
+_HISTORY: Dict[Tuple[str, str, int], List[Tuple[float, List[int]]]] = {}
+
+# ----------------------------
+# App
+# ----------------------------
+app = FastAPI(title="GEX MVP", version="1.0")
+
+if STATIC_DIR.exists():
+    app.mount("/static", StaticFiles(directory=str(STATIC_DIR)), name="static")
+
+
+@app.get("/")
+def root():
+    if INDEX_HTML.exists():
+        return FileResponse(str(INDEX_HTML))
+    return JSONResponse({"ok": False, "error": "index.html not found"}, status_code=404)
+
+
+@app.get("/landscape")
+def landscape():
+    if LANDSCAPE_HTML.exists():
+        return FileResponse(str(LANDSCAPE_HTML))
+    return JSONResponse({"ok": False, "error": "landscape.html not found"}, status_code=404)
+
+
+# NEW: /chart route
+@app.get("/chart")
+def chart():
+    """
+    Independent chart page (TradingView iframe + overlay).
+    Supports these file locations:
+      - /root/ironcondor/chart.html
+      - /root/ironcondor/charts.html
+      - /root/ironcondor/static/chart.html
+    """
+    if CHART_HTML.exists():
+        return FileResponse(str(CHART_HTML), media_type="text/html")
+    if CHARTS_HTML.exists():
+        return FileResponse(str(CHARTS_HTML), media_type="text/html")
+    if STATIC_CHART.exists():
+        return FileResponse(str(STATIC_CHART), media_type="text/html")
+
+    return HTMLResponse(
+        "<html><body style='font-family:system-ui;background:#0b1020;color:#e7eefc;padding:24px'>"
+        "<h2>Chart page not found</h2>"
+        "<p>Create one of the following:</p>"
+        f"<ul><li>{CHART_HTML}</li><li>{CHARTS_HTML}</li><li>{STATIC_CHART}</li></ul>"
+        "</body></html>",
+        status_code=404,
+    )
+
+
+@app.get("/api/ping")
+def ping():
+    return {"ok": True, "ts": int(time.time())}
+
+
+# ----------------------------
+# Token handling
+# ----------------------------
+def _load_token_doc() -> dict:
+    if not TOKEN_FILE.exists():
+        raise RuntimeError(f"Missing token file: {TOKEN_FILE}")
+    return json.loads(TOKEN_FILE.read_text(encoding="utf-8"))
+
+
+def _token_fields(doc: dict) -> dict:
+    # Your file structure: { "token": { "access_token":..., "refresh_token":..., "expires_at":... }, ... }
+    return doc.get("token") or {}
+
+
+def _is_access_expired(tok: dict) -> bool:
+    exp = tok.get("expires_at")
+    if not exp:
+        return False
+    try:
+        return time.time() >= float(exp) - 15
+    except Exception:
+        return False
+
+
+def _load_app_creds() -> Tuple[str, str]:
+    if not CRED_FILE.exists():
+        raise RuntimeError(f"Missing creds file: {CRED_FILE}")
+    j = json.loads(CRED_FILE.read_text(encoding="utf-8"))
+    cid = (j.get("client_id") or "").strip()
+    csec = (j.get("client_secret") or "").strip()
+    if not cid or not csec:
+        raise RuntimeError("Creds file missing client_id/client_secret.")
+    return cid, csec
+
+
+def _refresh_access_token(doc: dict) -> dict:
+    tok = _token_fields(doc)
+    rtoken = tok.get("refresh_token")
+    if not rtoken:
+        raise RuntimeError("Missing refresh_token in token file.")
+
+    cid, csec = _load_app_creds()
+
+    token_url = "https://api.schwabapi.com/v1/oauth/token"
+    auth = requests.auth.HTTPBasicAuth(cid, csec)
+    data = {"grant_type": "refresh_token", "refresh_token": rtoken}
+
+    r = requests.post(token_url, auth=auth, data=data, timeout=20)
+    if r.status_code != 200:
+        raise RuntimeError(f"Token refresh failed ({r.status_code})")
+
+    new_tok = r.json()
+    expires_in = int(new_tok.get("expires_in", 1800))
+
+    new_doc = dict(doc)
+    new_doc["token"] = dict(tok)
+    new_doc["token"]["access_token"] = new_tok.get("access_token", tok.get("access_token"))
+    new_doc["token"]["token_type"] = new_tok.get("token_type", tok.get("token_type", "Bearer"))
+    new_doc["token"]["scope"] = new_tok.get("scope", tok.get("scope", "api"))
+    new_doc["token"]["expires_in"] = expires_in
+    new_doc["token"]["expires_at"] = int(time.time()) + expires_in
+    if new_tok.get("refresh_token"):
+        new_doc["token"]["refresh_token"] = new_tok["refresh_token"]
+
+    TOKEN_FILE.write_text(json.dumps(new_doc, indent=2), encoding="utf-8")
+    return new_doc
+
+
+def _get_access_token() -> str:
+    doc = _load_token_doc()
+    tok = _token_fields(doc)
+
+    if _is_access_expired(tok):
+        try:
+            doc = _refresh_access_token(doc)
+            tok = _token_fields(doc)
+        except Exception:
+            exp = tok.get("expires_at")
+            hint = f"Token expires_at={exp}" if exp else "Token expired"
+            raise RuntimeError("Token expired. Update your token file (manual) then reload. " + hint)
+
+    access = (tok.get("access_token") or "").strip()
+    if not access:
+        raise RuntimeError("Missing access token in token file.")
+    return access
+
+
+# ----------------------------
+# Chain fetching + parsing
+# ----------------------------
+def _request_chain(symbol: str, strike_count: int, range_name: str) -> dict:
+    access = _get_access_token()
+    headers = {"Authorization": f"Bearer {access}"}
+    params = {
+        "symbol": symbol,
+        "strikeCount": strike_count,
+        "includeUnderlyingQuote": "TRUE",
+        "strategy": "SINGLE",
+        "range": range_name,
+    }
+    r = requests.get(CHAIN_URL, headers=headers, params=params, timeout=25)
+    if r.status_code != 200:
+        # keep message generic
+        raise RuntimeError(f"Chain fetch failed: {r.status_code}")
+    return r.json()
+
+
+def _extract_expiry_keys(chain: dict) -> List[str]:
+    call_map = chain.get("callExpDateMap") or {}
+    put_map = chain.get("putExpDateMap") or {}
+    keys = set(call_map.keys()) | set(put_map.keys())
+
+    def sort_key(k: str):
+        try:
+            d, dte = k.split(":")
+            return (d, int(dte))
+        except Exception:
+            return (k, 999999)
+
+    return sorted(keys, key=sort_key)
+
+
+def _pick_expiry(keys: List[str], dte: int, mode: str) -> str:
+    if not keys:
+        raise RuntimeError("No expiries in chain.")
+
+    def dte_of(k: str) -> int:
+        try:
+            return int(k.split(":")[1])
+        except Exception:
+            return 10**9
+
+    keys_sorted = sorted(keys, key=lambda k: abs(dte_of(k) - int(dte)))
+    if mode == "next":
+        best = keys_sorted[0]
+        best_dte = dte_of(best)
+        later = [k for k in keys if dte_of(k) > best_dte]
+        if later:
+            return sorted(later, key=dte_of)[0]
+        return best
+    return keys_sorted[0]
+
+
+def _iter_strikes(exp_map: dict) -> List[float]:
+    out = []
+    for strike_str in exp_map.keys():
+        try:
+            out.append(float(strike_str))
+        except Exception:
+            pass
+    return sorted(out)
+
+
+def _get_contract(exp_map: dict, strike: float) -> Optional[dict]:
+    k = f"{strike:.1f}"
+    if k not in exp_map:
+        k2 = str(int(strike)) if float(strike).is_integer() else str(strike)
+        if k2 in exp_map:
+            k = k2
+        else:
+            for kk in exp_map.keys():
+                try:
+                    if abs(float(kk) - strike) < 1e-6:
+                        k = kk
+                        break
+                except Exception:
+                    continue
+            else:
+                return None
+
+    arr = exp_map.get(k) or []
+    if not arr:
+        return None
+    return arr[0]
+
+
+def _mid(bid: Any, ask: Any, mark: Any) -> float:
+    try:
+        if mark is not None and float(mark) > 0:
+            return float(mark)
+    except Exception:
+        pass
+    try:
+        b = float(bid) if bid is not None else 0.0
+        a = float(ask) if ask is not None else 0.0
+        if b > 0 and a > 0:
+            return (b + a) / 2.0
+        if a > 0:
+            return a
+        return b
+    except Exception:
+        return 0.0
+
+
+def _safe_int(x: Any) -> int:
+    try:
+        return int(float(x))
+    except Exception:
+        return 0
+
+
+def _safe_float(x: Any) -> float:
+    try:
+        return float(x)
+    except Exception:
+        return 0.0
+
+
+# ----------------------------
+# Maxchange helpers
+# ----------------------------
+def _prune_history(key: Tuple[str, str, int]) -> None:
+    rows = _HISTORY.get(key)
+    if not rows:
+        return
+    now = time.time()
+    rows = [(ts, v) for (ts, v) in rows if (now - ts) <= HISTORY_MAX_AGE_SEC]
+    if len(rows) > HISTORY_MAX_POINTS:
+        rows = rows[-HISTORY_MAX_POINTS:]
+    _HISTORY[key] = rows
+
+
+def _push_history(key: Tuple[str, str, int], gex_oi: List[int]) -> None:
+    now = time.time()
+    rows = _HISTORY.get(key) or []
+    rows.append((now, list(gex_oi)))
+    _HISTORY[key] = rows
+    _prune_history(key)
+
+
+def _snapshot_at_or_before(key: Tuple[str, str, int], seconds_ago: int) -> Optional[List[int]]:
+    rows = _HISTORY.get(key) or []
+    if not rows:
+        return None
+    target = time.time() - seconds_ago
+    cand = None
+    for ts, vals in rows:
+        if ts <= target:
+            cand = vals
+        else:
+            break
+    return cand
+
+
+def _compute_maxchange_payload(strikes: List[float], current: List[int], past: List[int]) -> dict:
+    best_i = None
+    best_abs = -1
+    best_delta = 0
+    for i in range(min(len(current), len(past))):
+        d = int(current[i]) - int(past[i])
+        ad = abs(d)
+        if ad > best_abs:
+            best_abs = ad
+            best_i = i
+            best_delta = d
+    if best_i is None:
+        return {}
+    return {"strike": float(strikes[best_i]), "delta": int(best_delta)}
+
+
+def _compute_maxchange(key: Tuple[str, str, int], strikes: List[float], gex_oi: List[int]) -> Tuple[dict, dict]:
+    """
+    Returns:
+      maxchange: {"1m":{...},"5m":{...},"15m":{...}}
+      flips: {"1m":bool,"5m":bool,"15m":bool}
+    """
+    windows = {"1m": 60, "5m": 300, "15m": 900}
+    out = {}
+    flips = {}
+    for label, sec in windows.items():
+        past = _snapshot_at_or_before(key, sec)
+        if not past:
+            out[label] = {}
+            flips[label] = False
+            continue
+        mc = _compute_maxchange_payload(strikes, gex_oi, past)
+        out[label] = mc
+        flips[label] = False
+
+    # simple flip heuristic
+    try:
+        if out["1m"] and out["5m"]:
+            flips["1m"] = (out["1m"]["delta"] > 0 and out["5m"]["delta"] < 0) or (out["1m"]["delta"] < 0 and out["5m"]["delta"] > 0)
+    except Exception:
+        pass
+    return out, flips
+
+
+# ----------------------------
+# Snapshot computation
+# ----------------------------
+def _compute_snapshot(symbol: str, expiry_key: str, strike_count: int) -> dict:
+    cache_key = (symbol, expiry_key, strike_count)
+    hit = _CHAIN_CACHE.get(cache_key)
+
+    # IMPORTANT: use "<" not "<=" so a 3s sleep won't get stuck hitting cache forever
+    if hit and (time.time() - hit.t) < CACHE_TTL_SEC:
+        out = dict(hit.data)
+        out["cache"] = {"hit": True}
+        out["server_time"] = int(time.time())
+        return out
+
+    chain = _request_chain(symbol=symbol, strike_count=strike_count, range_name=DEFAULT_RANGE)
+
+    spot = _safe_float(chain.get("underlyingPrice") or chain.get("underlying", {}).get("mark"))
+    call_map_all = chain.get("callExpDateMap") or {}
+    put_map_all = chain.get("putExpDateMap") or {}
+
+    if expiry_key not in call_map_all and expiry_key not in put_map_all:
+        chain = _request_chain(symbol=symbol, strike_count=min(strike_count, 40), range_name="ALL")
+        call_map_all = chain.get("callExpDateMap") or {}
+        put_map_all = chain.get("putExpDateMap") or {}
+        spot = _safe_float(chain.get("underlyingPrice") or chain.get("underlying", {}).get("mark"))
+
+    if expiry_key not in call_map_all and expiry_key not in put_map_all:
+        raise RuntimeError("Could not find selected expiry in chain payload.")
+
+    call_map = call_map_all.get(expiry_key) or {}
+    put_map = put_map_all.get(expiry_key) or {}
+
+    strikes = sorted(set(_iter_strikes(call_map) + _iter_strikes(put_map)))
+    if not strikes:
+        raise RuntimeError("No strikes for selected expiry.")
+
+    atm_strike = min(strikes, key=lambda s: abs(s - spot)) if spot else strikes[len(strikes) // 2]
+    c_atm = _get_contract(call_map, atm_strike) or {}
+    p_atm = _get_contract(put_map, atm_strike) or {}
+
+    atm_call_mid = _mid(c_atm.get("bid"), c_atm.get("ask"), c_atm.get("mark"))
+    atm_put_mid = _mid(p_atm.get("bid"), p_atm.get("ask"), p_atm.get("mark"))
+
+    expected_move = float(atm_call_mid + atm_put_mid)
+    em_lower = spot - expected_move
+    em_upper = spot + expected_move
+
+    gex_oi: List[int] = []
+    gex_vol: List[int] = []
+
+    call_wall = None
+    put_wall = None
+    max_call_oi = -1
+    max_put_oi = -1
+
+    for s in strikes:
+        c = _get_contract(call_map, s) or {}
+        p = _get_contract(put_map, s) or {}
+
+        c_oi = _safe_int(c.get("openInterest"))
+        p_oi = _safe_int(p.get("openInterest"))
+        c_v = _safe_int(c.get("totalVolume"))
+        p_v = _safe_int(p.get("totalVolume"))
+
+        net_oi = c_oi - p_oi
+        net_vol = c_v - p_v
+
+        gex_oi.append(net_oi)
+        gex_vol.append(net_vol)
+
+        if c_oi > max_call_oi:
+            max_call_oi = c_oi
+            call_wall = s
+        if p_oi > max_put_oi:
+            max_put_oi = p_oi
+            put_wall = s
+
+    # zero pivot estimate
+    zero_gamma = None
+    idx_spot = min(range(len(strikes)), key=lambda i: abs(strikes[i] - spot)) if spot else len(strikes) // 2
+    best_abs = 10**18
+    best_strike = strikes[idx_spot]
+    for i, s in enumerate(strikes):
+        aa = abs(gex_oi[i])
+        if aa < best_abs:
+            best_abs = aa
+            best_strike = s
+
+    for i in range(1, len(strikes)):
+        if (gex_oi[i - 1] <= 0 <= gex_oi[i]) or (gex_oi[i - 1] >= 0 >= gex_oi[i]):
+            cand = strikes[i] if abs(strikes[i] - spot) < abs(strikes[i - 1] - spot) else strikes[i - 1]
+            if zero_gamma is None or abs(cand - spot) < abs(zero_gamma - spot):
+                zero_gamma = cand
+    if zero_gamma is None:
+        zero_gamma = best_strike
+
+    # push history and compute maxchange
+    hist_key = (symbol, expiry_key, strike_count)
+    _push_history(hist_key, gex_oi)
+    maxchange, flips = _compute_maxchange(hist_key, strikes, gex_oi)
+
+    out = {
+        "live": True,
+        "symbol": symbol,
+        "expiry": expiry_key,
+        "spot": round(spot, 2),
+        "atm_strike": float(atm_strike),
+        "atm_call_mid": round(atm_call_mid, 4),
+        "atm_put_mid": round(atm_put_mid, 4),
+        "expected_move": round(expected_move, 2),
+        "em_lower": round(em_lower, 2),
+        "em_upper": round(em_upper, 2),
+        "call_wall": float(call_wall) if call_wall is not None else None,
+        "put_wall": float(put_wall) if put_wall is not None else None,
+        "zero_gamma": float(zero_gamma) if zero_gamma is not None else None,
+        "histogram": {
+            "strikes": [float(x) for x in strikes],
+            "gex_oi": gex_oi,
+            "gex_vol": gex_vol,
+        },
+        "maxchange": maxchange,
+        "maxchange_flips": flips,
+        "unusual": [],
+        "cache": {"hit": False},
+        "server_time": int(time.time()),
+    }
+
+    _CHAIN_CACHE[cache_key] = CacheItem(t=time.time(), data=out)
+    return out
+
+
+# ----------------------------
+# Public APIs
+# ----------------------------
+@app.get("/api/expiries")
+def api_expiries(
+    symbol: str = Query("$SPX"),
+    limit: int = Query(8, ge=1, le=12),
+):
+    symbol = (symbol or "").strip() or "$SPX"
+    ck = (symbol, limit)
+    hit = _EXPIRY_CACHE.get(ck)
+    if hit and (time.time() - hit.t) <= EXPIRY_TTL_SEC:
+        out = dict(hit.data)
+        out["cache"] = {"hit": True}
+        return out
+
+    chain = _request_chain(symbol=symbol, strike_count=10, range_name=DEFAULT_RANGE)
+    keys = _extract_expiry_keys(chain)[:limit]
+    out = {"symbol": symbol, "expiries": keys, "cache": {"hit": False}}
+    _EXPIRY_CACHE[ck] = CacheItem(t=time.time(), data=out)
+    return out
+
+
+@app.get("/api/mvp")
+def api_mvp(
+    symbol: str = Query("$SPX"),
+    strike_count: int = Query(60, ge=10, le=200),
+    expiry: Optional[str] = Query(None),  # explicit key: "YYYY-MM-DD:DTE"
+    # keep these for compatibility, but dashboard can hide them
+    dte: int = Query(0, ge=0, le=365),
+    expiry_mode: str = Query("closest"),
+):
+    symbol = (symbol or "").strip() or "$SPX"
+    strike_count = int(min(max(strike_count, 10), MAX_STRIKECOUNT_HARD))
+
+    try:
+        if expiry and isinstance(expiry, str) and ":" in expiry:
+            expiry_key = expiry.strip()
+        else:
+            chain = _request_chain(symbol=symbol, strike_count=10, range_name=DEFAULT_RANGE)
+            keys = _extract_expiry_keys(chain)
+            expiry_key = _pick_expiry(keys, dte=dte, mode=expiry_mode)
+
+        snap = _compute_snapshot(symbol=symbol, expiry_key=expiry_key, strike_count=strike_count)
+        return snap
+
+    except Exception as e:
+        msg = str(e) or "Internal error"
+        return JSONResponse(status_code=500, content={"live": False, "error": msg})
+
